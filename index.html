@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Darrren's Space Arcade</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Press Start 2P', monospace; touch-action: manipulation; }
+    canvas { image-rendering: pixelated; }
+  </style>
+</head>
+<body class="bg-slate-950 text-emerald-400 min-h-screen flex flex-col items-center justify-between p-4 overflow-hidden selection:bg-emerald-500 selection:text-black">
+
+  <!-- Header -->
+  <header class="w-full max-w-2xl flex items-center justify-between py-2 border-b-2 border-emerald-500/30 text-xs">
+    <div>DARRREN.COM</div>
+    <div class="text-xs space-x-4">
+      <span>WEAPON: <span id="weaponText" class="text-yellow-400">SINGLE</span></span>
+      <span>SCORE: <span id="scoreText" class="text-emerald-400">00000</span></span>
+    </div>
+  </header>
+
+  <!-- Game Canvas -->
+  <main class="relative my-auto flex flex-col items-center justify-center w-full max-w-2xl">
+    <canvas id="gameCanvas" width="600" height="450" class="w-full h-auto bg-black border-4 border-emerald-500 rounded-lg shadow-[0_0_25px_rgba(16,185,129,0.3)]"></canvas>
+
+    <!-- Start Overlay -->
+    <div id="startOverlay" class="absolute inset-0 bg-black/90 flex flex-col items-center justify-center text-center p-6 rounded-lg">
+      <h1 class="text-xl md:text-2xl text-emerald-400 mb-2 animate-pulse">GALACTIC DEFENDER</h1>
+      <p class="text-[10px] text-slate-400 mb-6">RETRO SPACE SHOOTER</p>
+      
+      <div class="text-[9px] text-slate-300 space-y-2 mb-6 text-left border border-slate-800 p-4 rounded bg-slate-900/50">
+        <p>🎮 [←][→] : Move Ship</p>
+        <p>🚀 [SPACE] : Fire Laser</p>
+        <p>💣 [SHIFT] : Mega Bomb (Once/Game)</p>
+        <p>⚡ Collect <span class="text-yellow-400">[P]</span> to Upgrade Weapons!</p>
+      </div>
+
+      <button onclick="startGame()" class="px-6 py-3 bg-emerald-500 text-black text-xs font-bold rounded hover:bg-emerald-400 cursor-pointer">
+        PRESS TO START
+      </button>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div id="gameOverOverlay" class="hidden absolute inset-0 bg-black/90 flex flex-col items-center justify-center text-center p-6 rounded-lg">
+      <h2 id="overTitle" class="text-xl text-rose-500 mb-2">GAME OVER</h2>
+      <p id="finalScore" class="text-xs text-slate-300 mb-6">FINAL SCORE: 00000</p>
+      
+      <div class="flex gap-4 mb-6">
+        <button onclick="startGame()" class="px-5 py-2.5 bg-emerald-500 text-black text-xs font-bold rounded hover:bg-emerald-400 cursor-pointer">
+          PLAY AGAIN
+        </button>
+      </div>
+
+      <!-- Subtle Credit Button -->
+      <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank" class="text-[8px] text-slate-600 hover:text-slate-400 underline">
+        GIFT
+      </a>
+    </div>
+  </main>
+
+  <!-- Mobile Controls -->
+  <div class="w-full max-w-2xl flex items-center justify-between gap-2 mt-2 md:hidden">
+    <div class="flex gap-2">
+      <button id="btnLeft" class="px-5 py-3 bg-slate-800 border border-emerald-500/50 rounded text-emerald-400 active:bg-emerald-500 active:text-black">◄</button>
+      <button id="btnRight" class="px-5 py-3 bg-slate-800 border border-emerald-500/50 rounded text-emerald-400 active:bg-emerald-500 active:text-black">►</button>
+    </div>
+    <div class="flex gap-2">
+      <button id="btnBomb" class="px-4 py-3 bg-rose-600 text-white font-bold rounded text-xs active:bg-rose-500">BOMB</button>
+      <button id="btnFire" class="px-6 py-3 bg-emerald-500 text-black font-bold rounded text-xs active:bg-emerald-400">FIRE</button>
+    </div>
+  </div>
+
+  <footer class="w-full max-w-2xl text-center py-2 border-t border-slate-800 text-[8px] text-slate-600">
+    © 2026 DARRREN.COM · ALL RIGHTS RESERVED
+  </footer>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let score = 0;
+    let gameActive = false;
+    let weaponLevel = 1; // 1: Single, 2: Double, 3: Triple
+    let hasBomb = true;
+    let player = { x: canvas.width / 2 - 15, y: canvas.height - 35, width: 30, height: 20, speed: 6 };
+    
+    let bullets = [];
+    let enemies = [];
+    let powerups = [];
+    let particles = [];
+    let boss = null;
+    let keys = {};
+    let lastShot = 0;
+
+    window.addEventListener('keydown', e => {
+      keys[e.code] = true;
+      if (e.code === 'Shift' && gameActive) triggerBomb();
+      if (e.code === 'Space' && !gameActive && document.getElementById('gameOverOverlay').classList.contains('hidden')) startGame();
+    });
+    window.addEventListener('keyup', e => keys[e.code] = false);
+
+    const bindTouch = (id, action) => {
+      const el = document.getElementById(id);
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); action(); });
+    };
+    bindTouch('btnLeft', () => keys['ArrowLeft'] = true);
+    bindTouch('btnRight', () => keys['ArrowRight'] = true);
+    bindTouch('btnFire', () => keys['Space'] = true);
+    bindTouch('btnBomb', () => triggerBomb());
+
+    document.getElementById('btnLeft').addEventListener('touchend', () => keys['ArrowLeft'] = false);
+    document.getElementById('btnRight').addEventListener('touchend', () => keys['ArrowRight'] = false);
+    document.getElementById('btnFire').addEventListener('touchend', () => keys['Space'] = false);
+
+    function startGame() {
+      score = 0;
+      weaponLevel = 1;
+      hasBomb = true;
+      bullets = [];
+      enemies = [];
+      powerups = [];
+      particles = [];
+      boss = null;
+      player.x = canvas.width / 2 - 15;
+      gameActive = true;
+
+      document.getElementById('startOverlay').classList.add('hidden');
+      document.getElementById('gameOverOverlay').classList.add('hidden');
+      updateUI();
+      requestAnimationFrame(update);
+    }
+
+    function updateUI() {
+      document.getElementById('scoreText').innerText = String(score).padStart(5, '0');
+      const wNames = ['SINGLE', 'DOUBLE', 'TRIPLE'];
+      document.getElementById('weaponText').innerText = wNames[weaponLevel - 1];
+    }
+
+    function triggerBomb() {
+      if (!hasBomb || !gameActive) return;
+      hasBomb = false;
+      
+      // Explosion Particles
+      for (let i = 0; i < 100; i++) {
+        particles.push({
+          x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 12, vy: (Math.random() - 0.5) * 12,
+          color: '#f43f5e', size: 4, life: 30
+        });
+      }
+      
+      score += enemies.length * 50;
+      enemies = [];
+      if (boss) boss.hp -= 20;
+      updateUI();
+    }
+
+    function spawnParticle(x, y, color) {
+      for (let i = 0; i < 8; i++) {
+        particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6,
+          color, size: Math.random() * 3 + 1, life: 20
+        });
+      }
+    }
+
+    function update(timestamp) {
+      if (!gameActive) return;
+
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Player Movement
+      if (keys['ArrowLeft'] && player.x > 0) player.x -= player.speed;
+      if (keys['ArrowRight'] && player.x < canvas.width - player.width) player.x += player.speed;
+
+      // Shooting
+      if (keys['Space'] && timestamp - lastShot > 160) {
+        if (weaponLevel === 1) {
+          bullets.push({ x: player.x + player.width/2 - 2, y: player.y, vx: 0, vy: -8 });
+        } else if (weaponLevel === 2) {
+          bullets.push({ x: player.x + 5, y: player.y, vx: 0, vy: -8 });
+          bullets.push({ x: player.x + player.width - 9, y: player.y, vx: 0, vy: -8 });
+        } else {
+          bullets.push({ x: player.x + player.width/2 - 2, y: player.y, vx: 0, vy: -8 });
+          bullets.push({ x: player.x + player.width/2 - 2, y: player.y, vx: -2, vy: -8 });
+          bullets.push({ x: player.x + player.width/2 - 2, y: player.y, vx: 2, vy: -8 });
+        }
+        lastShot = timestamp;
+      }
+
+      // Draw Player
+      ctx.fillStyle = '#10b981';
+      ctx.fillRect(player.x + 12, player.y, 6, 6);
+      ctx.fillRect(player.x + 3, player.y + 6, 24, 8);
+      ctx.fillRect(player.x, player.y + 14, player.width, 6);
+
+      // Bullets Update
+      ctx.fillStyle = '#38bdf8';
+      bullets.forEach((b, i) => {
+        b.x += b.vx;
+        b.y += b.vy;
+        ctx.fillRect(b.x, b.y, 4, 10);
+        if (b.y < 0) bullets.splice(i, 1);
+      });
+
+      // Powerups Update
+      powerups.forEach((p, i) => {
+        p.y += 1.5;
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(p.x, p.y, 14, 14);
+        ctx.fillStyle = '#000000';
+        ctx.font = '8px "Press Start 2P"';
+        ctx.fillText('P', p.x + 3, p.y + 11);
+
+        if (p.x < player.x + player.width && p.x + 14 > player.x && p.y < player.y + player.height && p.y + 14 > player.y) {
+          weaponLevel = Math.min(3, weaponLevel + 1);
+          powerups.splice(i, 1);
+          updateUI();
+        }
+      });
+
+      // Enemy Spawning & Logic
+      if (Math.random() < 0.035 && !boss) {
+        const type = Math.random() < 0.2 ? 'fast' : (Math.random() < 0.15 ? 'tank' : 'normal');
+        enemies.push({
+          x: Math.random() * (canvas.width - 24), y: -20,
+          type,
+          width: type === 'tank' ? 28 : 20,
+          height: type === 'tank' ? 24 : 20,
+          hp: type === 'tank' ? 3 : 1,
+          speed: type === 'fast' ? 3.5 : (type === 'tank' ? 1 : 2),
+          color: type === 'fast' ? '#f43f5e' : (type === 'tank' ? '#22c55e' : '#a855f7')
+        });
+      }
+
+      // Boss Spawn at 1000 pts
+      if (score >= 1000 && !boss) {
+        boss = { x: canvas.width/2 - 40, y: -60, width: 80, height: 40, hp: 50, maxHp: 50, dir: 1 };
+      }
+
+      // Boss Logic
+      if (boss) {
+        if (boss.y < 40) boss.y += 1;
+        boss.x += boss.dir * 2;
+        if (boss.x <= 10 || boss.x + boss.width >= canvas.width - 10) boss.dir *= -1;
+
+        // Draw Boss
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(boss.x, boss.y, boss.width, boss.height);
+        // Boss HP Bar
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(150, 15, 300, 8);
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(150, 15, (boss.hp / boss.maxHp) * 300, 8);
+      }
+
+      // Enemy Updates & Collision
+      enemies.forEach((e, ei) => {
+        e.y += e.speed;
+        ctx.fillStyle = e.color;
+        ctx.fillRect(e.x, e.y, e.width, e.height);
+
+        // Bullet Hit Enemy
+        bullets.forEach((b, bi) => {
+          if (b.x < e.x + e.width && b.x + 4 > e.x && b.y < e.y + e.height && b.y + 10 > e.y) {
+            bullets.splice(bi, 1);
+            e.hp--;
+            spawnParticle(b.x, b.y, e.color);
+
+            if (e.hp <= 0) {
+              if (Math.random() < 0.15) powerups.push({ x: e.x, y: e.y });
+              enemies.splice(ei, 1);
+              score += e.type === 'tank' ? 300 : 100;
+              updateUI();
+            }
+          }
+        });
+
+        // Enemy Hit Player
+        if (e.y + e.height >= player.y && e.x < player.x + player.width && e.x + e.width > player.x) endGame(false);
+        if (e.y > canvas.height) enemies.splice(ei, 1);
+      });
+
+      // Bullet Hit Boss
+      if (boss) {
+        bullets.forEach((b, bi) => {
+          if (b.x < boss.x + boss.width && b.x + 4 > boss.x && b.y < boss.y + boss.height && b.y + 10 > boss.y) {
+            bullets.splice(bi, 1);
+            boss.hp--;
+            spawnParticle(b.x, b.y, '#ef4444');
+
+            if (boss.hp <= 0) {
+              score += 2000;
+              boss = null;
+              endGame(true);
+            }
+          }
+        });
+      }
+
+      // Particles Update
+      particles.forEach((p, pi) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, p.size, p.size);
+        if (p.life <= 0) particles.splice(pi, 1);
+      });
+
+      if (gameActive) requestAnimationFrame(update);
+    }
+
+    function endGame(victory) {
+      gameActive = false;
+      document.getElementById('overTitle').innerText = victory ? 'VICTORY!' : 'GAME OVER';
+      document.getElementById('overTitle').className = victory ? 'text-xl text-yellow-400 mb-2' : 'text-xl text-rose-500 mb-2';
+      document.getElementById('finalScore').innerText = `FINAL SCORE: ${String(score).padStart(5, '0')}`;
+      document.getElementById('gameOverOverlay').classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>
